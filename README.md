@@ -1,5 +1,7 @@
 # Rein
 
+> :warning: **This library is a work in progress!**
+
 Reinforcement Learning algorithms written in [Nx](https://github.com/elixir-nx/nx/tree/main/nx#readme).
 
 ## Installation
