@@ -1,13 +1,13 @@
 defmodule Rein.MixProject do
   use Mix.Project
 
-  @source_url "https://github.com/polvalente/rein"
-  @version "0.0.1"
+  @source_url "https://github.com/DockYard/rein"
+  @version "0.1.0"
 
   def project do
     [
       app: :rein,
-      version: "0.0.1",
+      version: "0.1.0",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: Mix.compilers(),
