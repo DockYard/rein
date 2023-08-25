@@ -40,8 +40,8 @@ defmodule Rein.MixProject do
   defp deps do
     [
       {:ex_doc, "~> 0.30", only: :docs},
-      {:nx, "~> 0.5"},
-      {:axon, "~> 0.5"}
+      {:nx, "~> 0.6"},
+      {:axon, "~> 0.6"}
       | backend()
     ]
   end
@@ -49,13 +49,13 @@ defmodule Rein.MixProject do
   defp backend do
     case System.get_env("REIN_NX_BACKEND") do
       "torchx" ->
-        [{:torchx, "~> 0.5"}]
+        [{:torchx, "~> 0.6"}]
 
       "binary" ->
         []
 
       _ ->
-        [{:exla, "~> 0.5"}]
+        [{:exla, "~> 0.6"}]
     end
   end
 

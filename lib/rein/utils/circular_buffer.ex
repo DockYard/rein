@@ -8,14 +8,40 @@ defmodule Rein.Utils.CircularBuffer do
   @derive {Nx.Container, containers: [:data, :index, :size], keep: []}
   defstruct [:data, :index, :size]
 
+  @doc """
+  Creates a new `#{__MODULE__}` with a given shape.
+
+  ## Options
+
+    * `:init_value` - a number or tensor that will be broadcasted
+      to `shape`. Defaults to `0`. If the value given is vectorized,
+      the buffer will be vectorized accordingly, but all entries will
+      share the same current index and size.
+
+    * `:type` - the type for the tensor if `:init_value`.
+      Defaults to `:f32`
+  """
   def new(shape, opts \\ [init_value: 0, type: :f32]) do
+    opts = Keyword.validate!(opts, init_value: 0, type: :f32)
+
+    init_value =
+      opts[:init_value]
+      |> Nx.to_tensor()
+      |> Nx.as_type(opts[:type])
+
     %__MODULE__{
-      data: Nx.broadcast(Nx.tensor(opts[:init_value], type: opts[:type]), shape),
+      data: Nx.broadcast(init_value, shape),
       size: 0,
       index: 0
     }
   end
 
+  @doc """
+  Append an item to the current buffer.
+
+  If the `buffer` data has shape `{a, b, c, ...}`,
+  `item` must have shape `{b, c, ...}`
+  """
   deftransform append(buffer, item) do
     starts = append_start_indices(buffer)
     n = Nx.axis_size(buffer.data, 0)
@@ -67,6 +93,13 @@ defmodule Rein.Utils.CircularBuffer do
     [buffer.index | List.duplicate(0, tuple_size(buffer.data.shape) - 1)]
   end
 
+  @doc """
+  Append multiple items to the buffer.
+
+  Works in a similar fashion to `append/2`, but receives
+  a tensor with shape equal to the buffer data except
+  for the first axis, which will be the number of items to be appended.
+  """
   deftransform append_multiple(buffer, items) do
     starts = append_start_indices(buffer)
     n = Nx.axis_size(buffer.data, 0)

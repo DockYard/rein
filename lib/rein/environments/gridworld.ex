@@ -1,4 +1,12 @@
 defmodule Rein.Environments.Gridworld do
+  @moduledoc """
+  Gridworld environment with 4 discrete actions.
+
+  Gridworld is an environment where the agent
+  aims to reach a given target from a collection
+  of possible targets, only being able to choose
+  1 of 4 actions: up, down, left and right.
+  """
   import Nx.Defn
 
   @behaviour Rein.Environment
@@ -12,7 +20,6 @@ defmodule Rein.Environments.Gridworld do
              :target_x,
              :target_y,
              :reward,
-             :reward_stage,
              :is_terminal,
              :possible_targets,
              :has_reached_target
@@ -26,7 +33,6 @@ defmodule Rein.Environments.Gridworld do
     :target_x,
     :target_y,
     :reward,
-    :reward_stage,
     :is_terminal,
     :possible_targets,
     :has_reached_target
@@ -39,8 +45,9 @@ defmodule Rein.Environments.Gridworld do
 
   def bounding_box, do: {@min_x, @max_x, @min_y, @max_y}
 
-  # x, y, target_x, target_y, prev_x, prev_y, reward_stage
-  def state_vector_size, do: 7
+  # x, y, target_x, target_y, has_reached_target, distance_norm
+  @doc "The size of the state vector returned by `as_state_vector/1`"
+  def state_vector_size, do: 6
 
   @impl true
   # up, down, left, right
@@ -160,6 +167,9 @@ defmodule Rein.Environments.Gridworld do
 
   defnp normalize(v, min, max), do: (v - min) / (max - min)
 
+  @doc """
+  Default function for turning the environment into a vector representation.
+  """
   defn as_state_vector(%{
          x: x,
          y: y,
