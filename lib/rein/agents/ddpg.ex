@@ -3,7 +3,7 @@ defmodule Rein.Agents.DDPG do
   Deep Deterministic Policy Gradient implementation.
 
   This assumes that the Actor network will output `{nil, num_actions}` actions,
-  and that the Critic network accepts `"actions"` input with the same shape.
+  and that the Critic network accepts the `"actions"` input with the same shape.
 
   Actions are deemed to be in a continuous space of type `:f32`.
   """
@@ -13,18 +13,6 @@ defmodule Rein.Agents.DDPG do
   alias Rein.Utils.CircularBuffer
 
   @behaviour Rein.Agent
-
-  @derive {Inspect,
-   except: [
-     #  :actor_params,
-     #  :actor_target_params,
-     #  :critic_params,
-     #  :critic_target_params,
-     #  :experience_replay_buffer,
-     #  :actor_optimizer_state,
-     #  :critic_optimizer_state,
-     #  :state_features_memory
-   ]}
 
   @derive {Nx.Container,
            containers: [

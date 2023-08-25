@@ -1,4 +1,12 @@
 defmodule Rein.Agents.QLearning do
+  @moduledoc """
+  Q-Learning implementation.
+
+  This implementation uses epsilon-greedy sampling
+  for exploration, and doesn't contemplate any kind
+  of target network.
+  """
+
   import Nx.Defn
 
   @behaviour Rein.Agent

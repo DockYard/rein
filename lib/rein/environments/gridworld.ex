@@ -49,7 +49,6 @@ defmodule Rein.Environments.Gridworld do
   @doc "The size of the state vector returned by `as_state_vector/1`"
   def state_vector_size, do: 6
 
-  @impl true
   # up, down, left, right
   def num_actions, do: 4
 

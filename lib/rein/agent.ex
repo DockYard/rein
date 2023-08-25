@@ -5,6 +5,7 @@ defmodule Rein.Agent do
 
   @typedoc "An arbitrary `Nx.Container` that holds metadata for the agent"
   @type t :: Nx.Container.t()
+
   @typedoc "The full state of the current Reinforcement Learning process, as stored in the `Rein` struct"
   @type rl_state :: Rein.t()
 
@@ -14,8 +15,10 @@ defmodule Rein.Agent do
   Should be implemented in a way that the result would be semantically
   the same as if `c:reset/2` was called in the end of the function.
 
-  As a suggestion, only initialize fixed values here, and delegate the
-  rest to `c:reset/2` internally.
+  As a suggestion, the implementation should only initialize fixed
+  values here, that is values that don't change between sessions
+  (epochs for non-episodic tasks, episodes for episodic tasks). Then,
+  call `c:reset/2` internally to initialize the rest of variable values.
   """
   @callback init(random_key :: Nx.t(), opts :: keyword) :: {t(), random_key :: Nx.t()}
 
