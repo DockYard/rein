@@ -1,13 +1,13 @@
 defmodule Rein.MixProject do
   use Mix.Project
 
-  @source_url "https://github.com/polvalente/rein"
-  @version "0.0.1"
+  @source_url "https://github.com/DockYard/rein"
+  @version "0.1.0"
 
   def project do
     [
       app: :rein,
-      version: "0.0.1",
+      version: "0.1.0",
       elixir: "~> 1.14",
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: Mix.compilers(),
@@ -40,8 +40,8 @@ defmodule Rein.MixProject do
   defp deps do
     [
       {:ex_doc, "~> 0.30", only: :docs},
-      {:nx, "~> 0.5"},
-      {:axon, "~> 0.5"}
+      {:nx, "~> 0.6"},
+      {:axon, "~> 0.6"}
       | backend()
     ]
   end
@@ -49,13 +49,13 @@ defmodule Rein.MixProject do
   defp backend do
     case System.get_env("REIN_NX_BACKEND") do
       "torchx" ->
-        [{:torchx, "~> 0.5"}]
+        [{:torchx, "~> 0.6"}]
 
       "binary" ->
         []
 
       _ ->
-        [{:exla, "~> 0.5"}]
+        [{:exla, "~> 0.6"}]
     end
   end
 
@@ -75,7 +75,21 @@ defmodule Rein.MixProject do
         "guides/gridworld.livemd"
       ],
       groups_for_functions: [],
-      groups_for_modules: []
+      groups_for_modules: [
+        Agents: [
+          Rein.Agents.QLearning,
+          Rein.Agents.DQN,
+          Rein.Agents.DDPG,
+          Rein.Agents.SAC
+        ],
+        Environments: [
+          Rein.Environments.Gridworld
+        ],
+        Utils: [
+          Rein.Utils.CircularBuffer,
+          Rein.Utils.Noise.OUProcess
+        ]
+      ]
     ]
   end
 end

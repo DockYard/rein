@@ -1,4 +1,4 @@
-# Reinforcement Learning
+# First steps with Gridworld
 
 ```elixir
 my_app_root = Path.join(__DIR__, "..")
@@ -9,7 +9,7 @@ Mix.install(
   ],
   config_path: Path.join(my_app_root, "config/config.exs"),
   lockfile: Path.join(my_app_root, "mix.lock"),
-  # change to "cuda118" to use CUDA
+  # change to "cuda118" or "cuda120" to use CUDA
   system_env: %{"XLA_TARGET" => "cpu"}
 )
 ```

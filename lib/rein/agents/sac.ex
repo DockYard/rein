@@ -10,13 +10,14 @@ defmodule Rein.Agents.SAC do
 
   Actions are deemed to be in a continuous space of type `:f32`.
 
-  For simplicity in the implementation of the Dual Q implementation,
-  `:critic_params` is vectorized with the axis `:critics` with default
-  size 2. Likewise, `:critic_target_params` and `:critic_optimizer_state`
-  are also vectorized in the same way.
+  The Dual Q implementation utilizes two copies of the critic network, `critic1` and `critic2`,
+  each with their own separate target network.
 
-  Vectorized axes from `:random_key` are still propagated normally throughout
-  the agent state for parallel training.
+  Vectorized axes from `:random_key` are propagated normally throughout
+  the agent state for parallel simulations, but all samples are stored in the same
+  circular buffer. After all simulations have ran, the optimization steps are run
+  on a sample space consisting of all previous experiences, including all of the
+  parallel simulations that have just finished executing.
   """
   import Nx.Defn
 

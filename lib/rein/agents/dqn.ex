@@ -1,4 +1,10 @@
 defmodule Rein.Agents.DQN do
+  @moduledoc """
+  Deep Q-Learning implementation.
+
+  This implementation utilizes a single target network for
+  the policy network.
+  """
   import Nx.Defn
 
   @behaviour Rein.Agent
@@ -134,9 +140,9 @@ defmodule Rein.Agents.DQN do
 
     # TO-DO: receive optimizer as argument
     {optimizer_init_fn, optimizer_update_fn} =
-      Axon.Updates.clip_by_global_norm()
-      |> Axon.Updates.compose(
-        Axon.Optimizers.adamw(learning_rate: @learning_rate, eps: @eps, decay: @adamw_decay)
+      Polaris.Updates.clip_by_global_norm()
+      |> Polaris.Updates.compose(
+        Polaris.Optimizers.adamw(learning_rate: @learning_rate, eps: @eps, decay: @adamw_decay)
       )
 
     initial_q_policy_state = opts[:q_policy] || raise "missing initial q_policy"
@@ -514,10 +520,7 @@ defmodule Rein.Agents.DQN do
               state_vector_size * 2 + 3,
               td_errors
             ),
-            huber_loss(expected_state_action_values, state_action_values)
-            # Axon.Losses.mean_squared_error(expected_state_action_values, state_action_values,
-            #   reduction: :mean
-            # )
+            Axon.Losses.huber(expected_state_action_values, state_action_values, reduction: :mean)
           }
         end,
         &elem(&1, 1)
@@ -612,15 +615,5 @@ defmodule Rein.Agents.DQN do
     indices = Nx.stack([row_idx, Nx.broadcast(target_column, {n})], axis: -1)
 
     Nx.indexed_put(buffer, indices, Nx.reshape(td_errors, {n}))
-  end
-
-  defnp huber_loss(y_true, y_pred, opts \\ [delta: 1.0]) do
-    delta = opts[:delta]
-
-    abs_diff = Nx.abs(y_pred - y_true)
-
-    (abs_diff <= delta)
-    |> Nx.select(0.5 * abs_diff ** 2, delta * abs_diff - 0.5 * delta ** 2)
-    |> Nx.mean()
   end
 end
