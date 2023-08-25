@@ -39,9 +39,9 @@ defmodule Rein.Environments.Gridworld do
   ]
 
   @min_x 0
-  @max_x 20
+  @max_x 4
   @min_y 0
-  @max_y 20
+  @max_y 4
 
   def bounding_box, do: {@min_x, @max_x, @min_y, @max_y}
 
@@ -75,10 +75,13 @@ defmodule Rein.Environments.Gridworld do
 
     target = Nx.reshape(target, {2})
 
+    target_x = target[0]
+    target_y = target[1]
+
     y = Nx.tensor(0, type: :s64)
 
-    [x, y, target_x, target_y, zero_bool, _key] =
-      Nx.broadcast_vectors([x, y, target[0], target[1], random_key, Nx.u8(0)])
+    # [x, y, target_x, target_y, zero_bool, _key] =
+    #   Nx.broadcast_vectors([x, y, target[0], target[1], random_key, Nx.u8(0)])
 
     state = %{
       state
@@ -89,8 +92,8 @@ defmodule Rein.Environments.Gridworld do
         target_x: target_x,
         target_y: target_y,
         reward: reward,
-        is_terminal: zero_bool,
-        has_reached_target: zero_bool
+        is_terminal: Nx.u8(0),
+        has_reached_target: Nx.u8(0)
     }
 
     {state, random_key}
@@ -104,19 +107,25 @@ defmodule Rein.Environments.Gridworld do
     {new_x, new_y} =
       cond do
         action == 0 ->
-          {x, Nx.min(y + 1, @max_y + 1)}
+          {x, y + 1}
 
         action == 1 ->
-          {x, Nx.max(y - 1, @min_y - 1)}
+          {x, y - 1}
 
         action == 2 ->
-          {Nx.min(@max_x + 1, x + 1), y}
+          {x + 1, y}
 
         true ->
-          {Nx.max(x - 1, @min_x - 1), y}
+          {x - 1, y}
       end
 
-    new_env = %{env | x: new_x, y: new_y, prev_x: x, prev_y: y}
+    new_env = %{
+      env
+      | x: Nx.clip(new_x, @min_x, @max_x),
+        y: Nx.clip(new_y, @min_y, @max_y),
+        prev_x: x,
+        prev_y: y
+    }
 
     updated_env =
       new_env
@@ -127,22 +136,8 @@ defmodule Rein.Environments.Gridworld do
   end
 
   defnp calculate_reward(env) do
-    %__MODULE__{
-      is_terminal: is_terminal,
-      has_reached_target: has_reached_target
-    } = env
-
-    reward =
-      cond do
-        has_reached_target ->
-          1
-
-        is_terminal ->
-          -1
-
-        true ->
-          -0.01
-      end
+    distance = Nx.abs(env.target_x - env.x) + Nx.abs(env.target_y - env.y)
+    reward = -1.0 * distance
 
     %{env | reward: reward}
   end
@@ -157,7 +152,7 @@ defmodule Rein.Environments.Gridworld do
   end
 
   defnp has_reached_target(%__MODULE__{x: x, y: y, target_x: target_x, target_y: target_y}) do
-    Nx.abs(target_x - x) <= 1.5 and Nx.abs(target_y - y) <= 1.5
+    target_x == x and target_y == y
   end
 
   defnp normalize(v, min, max), do: (v - min) / (max - min)

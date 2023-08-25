@@ -43,7 +43,7 @@ defmodule Rein do
           epoch_completed_callback :: (map() -> :ok),
           state_to_trajectory_fn :: (t() -> Nx.t()),
           opts :: keyword()
-        ) :: Axon.Loop.t()
+        ) :: term()
   # underscore vars below for doc names
   def train(
         _environment_with_options = {environment, environment_init_opts},
@@ -60,7 +60,8 @@ defmodule Rein do
         :checkpoint_path,
         checkpoint_serialization_fn: &Nx.serialize/1,
         accumulated_episodes: 0,
-        num_episodes: 100
+        num_episodes: 100,
+        output_transform: & &1
       ])
 
     random_key = opts[:random_key] || Nx.Random.key(System.system_time())
@@ -112,7 +113,8 @@ defmodule Rein do
       num_episodes: num_episodes,
       max_iter: max_iter,
       model_name: model_name,
-      checkpoint_path: opts[:checkpoint_path]
+      checkpoint_path: opts[:checkpoint_path],
+      output_transform: opts[:output_transform]
     )
   end
 
@@ -121,11 +123,13 @@ defmodule Rein do
     state_to_trajectory_fn = Keyword.fetch!(opts, :state_to_trajectory_fn)
     num_episodes = Keyword.fetch!(opts, :num_episodes)
     max_iter = Keyword.fetch!(opts, :max_iter)
+    output_transform = Keyword.fetch!(opts, :output_transform)
 
     loop_fn = &batch_step(&1, &2, agent, environment, state_to_trajectory_fn)
 
     loop_fn
     |> Axon.Loop.loop()
+    |> then(&%{&1 | output_transform: output_transform})
     |> Axon.Loop.handle_event(
       :epoch_started,
       &{:continue,

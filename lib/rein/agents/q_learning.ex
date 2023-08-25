@@ -14,37 +14,25 @@ defmodule Rein.Agents.QLearning do
   @derive {Nx.Container,
            containers: [
              :q_matrix,
-             :loss,
-             :loss_denominator,
              :observation
            ],
            keep: [
              :num_actions,
-             :environment_to_input_fn,
              :environment_to_state_vector_fn,
-             :state_vector_to_input_fn,
              :learning_rate,
-             :batch_size,
              :gamma,
              :exploration_eps,
-             :exploration_decay_rate,
              :state_space_shape
            ]}
 
   defstruct [
     :q_matrix,
     :observation,
-    :loss,
-    :loss_denominator,
     :num_actions,
-    :environment_to_input_fn,
     :environment_to_state_vector_fn,
-    :state_vector_to_input_fn,
     :learning_rate,
-    :batch_size,
     :gamma,
     :exploration_eps,
-    :exploration_decay_rate,
     :state_space_shape
   ]
 
@@ -57,8 +45,7 @@ defmodule Rein.Agents.QLearning do
         :environment_to_state_vector_fn,
         :learning_rate,
         :gamma,
-        :exploration_eps,
-        :exploration_decay_rate
+        :exploration_eps
       ])
 
     state_space_shape = opts[:state_space_shape]
@@ -76,36 +63,28 @@ defmodule Rein.Agents.QLearning do
       environment_to_state_vector_fn: opts[:environment_to_state_vector_fn],
       learning_rate: opts[:learning_rate],
       gamma: opts[:gamma],
-      exploration_decay_rate: opts[:exploration_decay_rate],
       exploration_eps: opts[:exploration_eps],
-      state_space_shape: state_space_shape
+      state_space_shape: state_space_shape,
+      num_actions: num_actions
     }
 
-    {state, random_key}
+    reset(random_key, state)
   end
 
   @impl true
-  def reset(random_key, %Rein{agent_state: state}) do
-    zero = Nx.tensor(0, type: :f32)
+  def reset(random_key, %Rein{agent_state: agent_state}), do: reset(random_key, agent_state)
 
-    state = Nx.broadcast(0, state.state_space_shape)
+  def reset(random_key, %__MODULE__{} = agent_state) do
+    zero = Nx.tensor(0, type: :f32)
 
     observation = %{
       action: 0,
-      state: state,
-      next_state: state,
+      state: 0,
+      next_state: 0,
       reward: zero
     }
 
-    [observation, _] = Nx.broadcast_vectors([observation, random_key])
-
-    {%{
-       state
-       | total_reward: zero,
-         loss: zero,
-         loss_denominator: zero,
-         observation: observation
-     }, random_key}
+    {%__MODULE__{agent_state | observation: observation}, random_key}
   end
 
   @impl true
@@ -162,7 +141,7 @@ defmodule Rein.Agents.QLearning do
   end
 
   @impl true
-  defn optimize_model(state) do
+  defn optimize_model(rl_state) do
     %{
       observation: %{
         state: state,
@@ -173,7 +152,7 @@ defmodule Rein.Agents.QLearning do
       q_matrix: q_matrix,
       gamma: gamma,
       learning_rate: learning_rate
-    } = state.agent_state
+    } = rl_state.agent_state
 
     # Q_table[current_state, action] =
     # (1-lr) * Q_table[current_state, action] +
@@ -183,7 +162,9 @@ defmodule Rein.Agents.QLearning do
       (1 - learning_rate) * q_matrix[[state, action]] +
         learning_rate * (reward + gamma * Nx.reduce_max(q_matrix[next_state]))
 
-    Nx.indexed_put(q_matrix, Nx.stack([state, action]), q)
+    q_matrix = Nx.indexed_put(q_matrix, Nx.stack([state, action]), q)
+
+    %{rl_state | agent_state: %{rl_state.agent_state | q_matrix: q_matrix}}
   end
 
   deftransformp state_vector_to_index(state_vector, shape) do
