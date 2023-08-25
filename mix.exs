@@ -75,7 +75,21 @@ defmodule Rein.MixProject do
         "guides/gridworld.livemd"
       ],
       groups_for_functions: [],
-      groups_for_modules: []
+      groups_for_modules: [
+        Agents: [
+          Rein.Agents.QLearning,
+          Rein.Agents.DQN,
+          Rein.Agents.DDPG,
+          Rein.Agents.SAC
+        ],
+        Environments: [
+          Rein.Environments.Gridworld
+        ],
+        Utils: [
+          Rein.Utils.CircularBuffer,
+          Rein.Utils.Noise.OUProcess
+        ]
+      ]
     ]
   end
 end
