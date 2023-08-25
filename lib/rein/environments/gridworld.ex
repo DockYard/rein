@@ -77,12 +77,8 @@ defmodule Rein.Environments.Gridworld do
 
     y = Nx.tensor(0, type: :s64)
 
-    target_x = target[0]
-    target_y = target[1]
-    zero_bool = Nx.tensor(false)
-    # TO-DO: needs Nx 0.6
-    # [x, y, target_x, target_y, zero_bool, _key] =
-    #   Nx.broadcast_vectors([x, y, target[0], target[1], random_key, Nx.u8(0)])
+    [x, y, target_x, target_y, zero_bool, _key] =
+      Nx.broadcast_vectors([x, y, target[0], target[1], random_key, Nx.u8(0)])
 
     state = %{
       state
