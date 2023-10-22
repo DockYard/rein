@@ -123,62 +123,53 @@ defmodule Rein do
     state_to_trajectory_fn = Keyword.fetch!(opts, :state_to_trajectory_fn)
     num_episodes = Keyword.fetch!(opts, :num_episodes)
     max_iter = Keyword.fetch!(opts, :max_iter)
-    output_transform = Keyword.fetch!(opts, :output_transform)
 
-    loop_fn = &batch_step(&1, &2, agent, environment, state_to_trajectory_fn)
+    Enum.reduce_while(1..num_episodes, initial_state, fn episode, state ->
+      Enum.reduce_while(
+        1..max_iter,
+        reset_state(state, agent, environment, state_to_trajectory_fn),
+        fn _iter, state ->
+          next_state = batch_step(state, agent, environment, state_to_trajectory_fn)
 
-    loop_fn
-    |> Axon.Loop.loop()
-    |> then(&%{&1 | output_transform: output_transform})
-    |> Axon.Loop.handle_event(
-      :epoch_started,
-      &{:continue,
-       %{&1 | step_state: reset_state(&1.step_state, agent, environment, state_to_trajectory_fn)}}
-    )
-    |> Axon.Loop.handle_event(:epoch_completed, fn loop_state ->
-      loop_state = tap(loop_state, epoch_completed_callback)
-      {:continue, loop_state}
-    end)
-    |> Axon.Loop.handle_event(:iteration_completed, fn loop_state ->
-      is_terminal =
-        loop_state.step_state.environment_state.is_terminal
-        |> Nx.devectorize()
-        |> Nx.all()
-        |> Nx.to_number()
+          is_terminal =
+            next_state.environment_state.is_terminal
+            |> Nx.devectorize()
+            |> Nx.all()
+            |> Nx.to_number()
 
-      if is_terminal == 1 do
-        {:halt_epoch, loop_state}
-      else
-        {:continue, loop_state}
-      end
+          if is_terminal == 1 do
+            {:halt, next_state}
+          else
+            {:cont, next_state}
+          end
+        end
+      )
+      |> tap(epoch_completed_callback)
+      |> tap(
+        &checkpoint(
+          &1,
+          episode,
+          opts[:model_name],
+          opts[:checkpoint_path],
+          opts[:checkpoint_serialization_fn]
+        )
+      )
     end)
-    |> Axon.Loop.handle_event(:epoch_halted, fn loop_state ->
-      loop_state = tap(loop_state, epoch_completed_callback)
-      {:halt_epoch, loop_state}
-    end)
-    |> Axon.Loop.checkpoint(
-      event: :epoch_halted,
-      filter: [every: 1000],
-      file_pattern: fn %{epoch: epoch} ->
-        "checkpoint_" <> opts[:model_name] <> "_#{epoch}.ckpt"
-      end,
-      path: opts[:checkpoint_path],
-      serialize_step_state: opts[:checkpoint_serialization_fn]
-    )
-    |> Axon.Loop.checkpoint(
-      event: :epoch_completed,
-      filter: [every: 100],
-      file_pattern: fn %{epoch: epoch} ->
-        "checkpoint_" <> opts[:model_name] <> "_#{epoch}.ckpt"
-      end,
-      path: opts[:checkpoint_path],
-      serialize_step_state: opts[:checkpoint_serialization_fn]
-    )
-    |> Axon.Loop.run(Stream.cycle([Nx.tensor(1)]), initial_state,
-      iterations: max_iter,
-      epochs: num_episodes,
-      debug: Application.get_env(:rein, :debug, false)
-    )
+  end
+
+  defp checkpoint(_state, epoch, _model_name, _checkpoint_path, _checkpoint_serialization_fn) do
+    if rem(epoch, 1000) == 0 do
+      # save model
+      # |> Axon.Loop.checkpoint(
+      #   event: :epoch_completed,
+      #   filter: [every: 100],
+      #   file_pattern: fn %{epoch: epoch} ->
+      #     "checkpoint_" <> opts[:model_name] <> "_#{epoch}.ckpt"
+      #   end,
+      #   path: opts[:checkpoint_path],
+      #   serialize_step_state: opts[:checkpoint_serialization_fn]
+      # )
+    end
   end
 
   defp reset_state(
@@ -209,7 +200,6 @@ defmodule Rein do
   end
 
   defp batch_step(
-         _inputs,
          prev_state,
          agent,
          environment,
