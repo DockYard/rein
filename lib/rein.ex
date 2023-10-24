@@ -124,11 +124,11 @@ defmodule Rein do
     num_episodes = Keyword.fetch!(opts, :num_episodes)
     max_iter = Keyword.fetch!(opts, :max_iter)
 
-    Enum.reduce_while(1..num_episodes, initial_state, fn episode, state ->
+    Enum.reduce(1..num_episodes, initial_state, fn episode, state_outer ->
       Enum.reduce_while(
         1..max_iter,
-        reset_state(state, agent, environment, state_to_trajectory_fn),
-        fn _iter, state ->
+        reset_state(state_outer, agent, environment, state_to_trajectory_fn),
+        fn _iteration, state ->
           next_state = batch_step(state, agent, environment, state_to_trajectory_fn)
 
           is_terminal =
@@ -144,7 +144,9 @@ defmodule Rein do
           end
         end
       )
-      |> tap(epoch_completed_callback)
+      |> tap(fn state ->
+        epoch_completed_callback.(%{step_state: state, epoch: episode})
+      end)
       |> tap(
         &checkpoint(
           &1,
