@@ -664,7 +664,7 @@ defmodule Rein.Agents.SAC do
       case train_log_entropy_coefficient do
         false ->
           # entropy_coef is non-trainable
-          {log_entropy_coefficient, random_key}
+          {log_entropy_coefficient, %{}, random_key}
 
         true ->
           {_actions, log_probs, random_key} =
