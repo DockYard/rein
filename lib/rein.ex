@@ -6,9 +6,7 @@ defmodule Rein do
   import Nx.Defn
 
   @type t :: %__MODULE__{
-          agent: module(),
           agent_state: term(),
-          environment: module(),
           environment_state: term(),
           episode: Nx.t(),
           iteration: Nx.t(),
@@ -27,9 +25,7 @@ defmodule Rein do
            ],
            keep: []}
   defstruct [
-    :agent,
     :agent_state,
-    :environment,
     :environment_state,
     :random_key,
     :iteration,
@@ -82,15 +78,12 @@ defmodule Rein do
     {agent_state, random_key} =
       agent.reset(random_key, %__MODULE__{
         environment_state: environment_state,
-        agent: agent,
         agent_state: init_agent_state,
         episode: episode
       })
 
     initial_state = %__MODULE__{
-      agent: agent,
       agent_state: agent_state,
-      environment: environment,
       environment_state: environment_state,
       random_key: random_key,
       iteration: iteration,
@@ -128,7 +121,7 @@ defmodule Rein do
       Enum.reduce_while(
         1..max_iter,
         {reset_state(state_outer, agent, environment, state_to_trajectory_fn), 0},
-        fn iteration, {state, _} ->
+        fn iteration, {state, _iter} ->
           next_state = batch_step(state, agent, environment, state_to_trajectory_fn)
 
           is_terminal =
@@ -145,13 +138,7 @@ defmodule Rein do
         end
       )
       |> then(fn {state, iteration} ->
-        # result purposefully ignored
-        epoch_completed_callback.(%{
-          step_state: state,
-          episode: episode,
-          iteration: iteration
-        })
-
+        epoch_completed_callback.(%{step_state: state, episode: episode, iteration: iteration})
         state
       end)
       |> tap(
