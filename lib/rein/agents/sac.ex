@@ -535,7 +535,6 @@ defmodule Rein.Agents.SAC do
         state,
         training_frequency * vectorized_axes(state.environment_state.is_terminal),
         Nx.tensor(false)
-        # Nx.u8(0)
       )
     else
       state
@@ -551,33 +550,29 @@ defmodule Rein.Agents.SAC do
   end
 
   deftransformp train_loop(state, training_frequency, exploring) do
-    if training_frequency == 1 do
-      train_loop_step(state, exploring)
-    else
-      train_loop_while(state, exploring, training_frequency: training_frequency)
-    end
-    |> elem(0)
+    # if training_frequency == 1 do
+    # train_loop_step(state)
+    state
+    # else
+    # train_loop_while(state, training_frequency: training_frequency)
+    # state
+    # end
   end
 
-  defnp train_loop_while(state, exploring, opts \\ []) do
+  defnp train_loop_while(state, opts \\ []) do
     training_frequency = opts[:training_frequency]
 
-    while {state, exploring}, _ <- 0..(training_frequency - 1)//1, unroll: false do
-      train_loop_step(state, exploring)
+    while state, _ <- 0..(training_frequency - 1)//1, unroll: false do
+      train_loop_step(state)
     end
   end
 
-  defnp train_loop_step(state, exploring) do
+  defnp train_loop_step(state) do
     {batch, random_key} = sample_experience_replay_buffer(state.random_key, state.agent_state)
 
-    train_actor = not exploring
-
-    updated_state =
-      %{state | random_key: random_key}
-      |> train(batch, train_actor)
-      |> soft_update_targets(train_actor)
-
-    {updated_state, exploring}
+    %{state | random_key: random_key}
+    |> train(batch, true)
+    |> soft_update_targets(true)
   end
 
   defnp train(state, batch, train_actor) do
@@ -750,8 +745,17 @@ defmodule Rein.Agents.SAC do
     ### Train Actor
 
     ks = Nx.Random.split(random_key)
-    random_key = ks[0]
-    k1 = ks[1] |> Nx.devectorize() |> Nx.take(0)
+
+    {random_key, k1} =
+      case {Nx.flat_size(ks), Nx.size(ks)} do
+        {s, s} ->
+          {ks[0], ks[1]}
+
+        _ ->
+          random_key = ks[0]
+          k1 = ks[1] |> Nx.devectorize() |> Nx.take(0)
+          {random_key, k1}
+      end
 
     {actor_params, actor_optimizer_state} =
       if train_actor do

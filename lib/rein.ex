@@ -127,8 +127,8 @@ defmodule Rein do
     Enum.reduce(1..num_episodes, initial_state, fn episode, state_outer ->
       Enum.reduce_while(
         1..max_iter,
-        reset_state(state_outer, agent, environment, state_to_trajectory_fn),
-        fn _iteration, state ->
+        {reset_state(state_outer, agent, environment, state_to_trajectory_fn), 0},
+        fn iteration, {state, _} ->
           next_state = batch_step(state, agent, environment, state_to_trajectory_fn)
 
           is_terminal =
@@ -138,14 +138,21 @@ defmodule Rein do
             |> Nx.to_number()
 
           if is_terminal == 1 do
-            {:halt, next_state}
+            {:halt, {next_state, iteration}}
           else
-            {:cont, next_state}
+            {:cont, {next_state, iteration}}
           end
         end
       )
-      |> tap(fn state ->
-        epoch_completed_callback.(%{step_state: state, epoch: episode})
+      |> then(fn {state, iteration} ->
+        # result purposefully ignored
+        epoch_completed_callback.(%{
+          step_state: state,
+          episode: episode,
+          iteration: iteration
+        })
+
+        state
       end)
       |> tap(
         &checkpoint(
