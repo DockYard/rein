@@ -533,8 +533,7 @@ defmodule Rein.Agents.SAC do
     if is_terminal and state.agent_state.experience_replay_buffer.size > batch_size do
       train_loop(
         state,
-        training_frequency * vectorized_axes(state.environment_state.is_terminal),
-        Nx.tensor(false)
+        training_frequency * vectorized_axes(state.environment_state.is_terminal)
       )
     else
       state
@@ -549,14 +548,12 @@ defmodule Rein.Agents.SAC do
     div(Nx.flat_size(t), Nx.size(t))
   end
 
-  deftransformp train_loop(state, training_frequency, exploring) do
-    # if training_frequency == 1 do
-    # train_loop_step(state)
-    state
-    # else
-    # train_loop_while(state, training_frequency: training_frequency)
-    # state
-    # end
+  deftransformp train_loop(state, training_frequency) do
+    if training_frequency == 1 do
+      train_loop_step(state)
+    else
+      train_loop_while(state, training_frequency: training_frequency)
+    end
   end
 
   defnp train_loop_while(state, opts \\ []) do
@@ -659,7 +656,7 @@ defmodule Rein.Agents.SAC do
       case train_log_entropy_coefficient do
         false ->
           # entropy_coef is non-trainable
-          {log_entropy_coefficient, %{}, random_key}
+          {log_entropy_coefficient, log_entropy_coefficient_optimizer_state, random_key}
 
         true ->
           {_actions, log_probs, random_key} =
