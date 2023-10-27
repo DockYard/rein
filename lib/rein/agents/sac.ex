@@ -27,19 +27,6 @@ defmodule Rein.Agents.SAC do
 
   @behaviour Rein.Agent
 
-  @derive {Inspect,
-           except: [
-             :actor_params,
-             :actor_target_params,
-             :critic1_params,
-             :critic2_params,
-             :critic1_target_params,
-             :critic2_target_params,
-             :experience_replay_buffer,
-             :actor_optimizer_state,
-             :critic1_optimizer_state,
-             :critic2_optimizer_state
-           ]}
   @derive {Nx.Container,
            containers: [
              :actor_params,
