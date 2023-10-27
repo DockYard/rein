@@ -50,8 +50,8 @@ defmodule Rein.Agents.SAC do
              :tau,
              :state_features_memory,
              :log_entropy_coefficient,
-             :target_entropy,
-             :log_entropy_coefficient_optimizer_state
+             :log_entropy_coefficient_optimizer_state,
+             :target_entropy
            ],
            keep: [
              :exploration_fn,
@@ -73,12 +73,10 @@ defmodule Rein.Agents.SAC do
     :num_actions,
     :actor_params,
     :actor_target_params,
-    :actor_net,
     :critic1_params,
     :critic2_params,
     :critic1_target_params,
     :critic2_target_params,
-    :critic_net,
     :actor_predict_fn,
     :critic_predict_fn,
     :experience_replay_buffer,
@@ -104,10 +102,10 @@ defmodule Rein.Agents.SAC do
     :input_entry_size,
     :log_entropy_coefficient,
     :reward_scale,
+    :train_log_entropy_coefficient,
     :log_entropy_coefficient_optimizer_update_fn,
-    :target_entropy,
     :log_entropy_coefficient_optimizer_state,
-    :train_log_entropy_coefficient
+    :target_entropy
   ]
 
   @impl true
@@ -161,12 +159,13 @@ defmodule Rein.Agents.SAC do
     {actor_optimizer_init_fn, actor_optimizer_update_fn} = opts[:actor_optimizer]
     {critic_optimizer_init_fn, critic_optimizer_update_fn} = opts[:critic_optimizer]
 
+    log_entropy_coefficient = :math.log(opts[:entropy_coefficient])
+
     {train_log_entropy_coefficient, log_entropy_coefficient_optimizer_init_fn,
-     log_entropy_coefficient_optimizer_update_fn,
-     log_entropy_coefficient} =
+     log_entropy_coefficient_optimizer_update_fn} =
       case opts[:entropy_coefficient_optimizer] do
-        {init, upd} -> {true, init, upd, 0}
-        _ -> {false, &Function.identity/1, nil, :math.log(opts[:entropy_coefficient])}
+        {init, upd} -> {true, init, upd}
+        _ -> {false, fn _ -> 0 end, 0}
       end
 
     actor_net = opts[:actor_net]
@@ -195,10 +194,9 @@ defmodule Rein.Agents.SAC do
       {eps, random_key} = Nx.Random.normal(random_key, shape: eps_shape)
 
       pre_squash_action = Nx.add(mu, Nx.multiply(stddev, eps))
-
-      log_probability = action_log_probability(mu, stddev, log_stddev, pre_squash_action)
-
       action = Nx.tanh(pre_squash_action)
+
+      log_probability = action_log_probability(mu, stddev, log_stddev, pre_squash_action, action)
 
       {action, log_probability, random_key}
     end
@@ -261,8 +259,8 @@ defmodule Rein.Agents.SAC do
     critic1_target_params = critic_init_fn.(critic_template, %{})
     critic2_target_params = critic_init_fn.(critic_template, %{})
 
-    critic1_optimizer_state = critic_optimizer_init_fn.(%{})
-    critic2_optimizer_state = critic_optimizer_init_fn.(%{})
+    critic1_optimizer_state = critic_optimizer_init_fn.(critic1_target_params)
+    critic2_optimizer_state = critic_optimizer_init_fn.(critic2_target_params)
 
     state_features_size = opts[:state_features_size]
 
@@ -308,18 +306,18 @@ defmodule Rein.Agents.SAC do
       exploration_increase_rate: opts[:exploration_increase_rate],
       log_entropy_coefficient_optimizer_state: log_entropy_coefficient_optimizer_state,
       log_entropy_coefficient_optimizer_update_fn: log_entropy_coefficient_optimizer_update_fn,
+      target_entropy: -num_actions,
+      train_log_entropy_coefficient: train_log_entropy_coefficient,
       state_features_memory:
         opts[:state_features_memory] ||
           CircularBuffer.new({state_features_memory_length, state_features_size}),
       num_actions: num_actions,
       actor_params: actor_params,
       actor_target_params: actor_target_params,
-      actor_net: actor_net,
       critic1_params: critic1_params,
       critic2_params: critic2_params,
       critic1_target_params: critic1_target_params,
       critic2_target_params: critic2_target_params,
-      critic_net: critic_net,
       actor_predict_fn: actor_predict_fn,
       critic_predict_fn: critic_predict_fn,
       experience_replay_buffer: exp_replay_buffer,
@@ -338,15 +336,13 @@ defmodule Rein.Agents.SAC do
       critic2_optimizer_state: critic2_optimizer_state,
       action_lower_limit: opts[:action_lower_limit],
       action_upper_limit: opts[:action_upper_limit],
-      log_entropy_coefficient: log_entropy_coefficient,
-      reward_scale: opts[:reward_scale],
-      target_entropy: 0.98 * num_actions,
-      train_log_entropy_coefficient: train_log_entropy_coefficient
+      log_entropy_coefficient: Nx.log(opts[:entropy_coefficient]),
+      reward_scale: opts[:reward_scale]
     }
 
     saved_state =
       (opts[:saved_state] || %{})
-      |> Map.take(Map.keys(%__MODULE__{}))
+      |> Map.take(Map.keys(%__MODULE__{}) -- [:__struct__])
       |> Enum.filter(fn {_, v} -> v end)
       |> Map.new()
 
@@ -533,9 +529,7 @@ defmodule Rein.Agents.SAC do
     if is_terminal and state.agent_state.experience_replay_buffer.size > batch_size do
       train_loop(
         state,
-        training_frequency * vectorized_axes(state.environment_state.is_terminal),
-        Nx.tensor(false)
-        # Nx.u8(0)
+        training_frequency * vectorized_axes(state.environment_state.is_terminal)
       )
     else
       state
@@ -550,37 +544,31 @@ defmodule Rein.Agents.SAC do
     div(Nx.flat_size(t), Nx.size(t))
   end
 
-  deftransformp train_loop(state, training_frequency, exploring) do
+  deftransformp train_loop(state, training_frequency) do
     if training_frequency == 1 do
-      train_loop_step(state, exploring)
+      train_loop_step(state)
     else
-      train_loop_while(state, exploring, training_frequency: training_frequency)
+      train_loop_while(state, training_frequency: training_frequency)
     end
-    |> elem(0)
   end
 
-  defnp train_loop_while(state, exploring, opts \\ []) do
+  defnp train_loop_while(state, opts \\ []) do
     training_frequency = opts[:training_frequency]
 
-    while {state, exploring}, _ <- 0..(training_frequency - 1)//1, unroll: false do
-      train_loop_step(state, exploring)
+    while state, _ <- 0..(training_frequency - 1)//1, unroll: false do
+      train_loop_step(state)
     end
   end
 
-  defnp train_loop_step(state, exploring) do
+  defnp train_loop_step(state) do
     {batch, random_key} = sample_experience_replay_buffer(state.random_key, state.agent_state)
 
-    train_actor = not exploring
-
-    updated_state =
-      %{state | random_key: random_key}
-      |> train(batch, train_actor)
-      |> soft_update_targets(train_actor)
-
-    {updated_state, exploring}
+    %{state | random_key: random_key}
+    |> train(batch)
+    |> soft_update_targets()
   end
 
-  defnp train(state, batch, train_actor) do
+  defnp train(state, batch) do
     %{
       agent_state: %__MODULE__{
         actor_params: actor_params,
@@ -609,6 +597,19 @@ defmodule Rein.Agents.SAC do
       },
       random_key: random_key
     } = state
+
+    ks = Nx.Random.split(random_key)
+
+    {random_key, k1} =
+      case {Nx.flat_size(random_key), Nx.size(random_key)} do
+        {s, s} ->
+          {ks[0], ks[1]}
+
+        _ ->
+          random_key = ks[0]
+          k1 = ks[1] |> Nx.devectorize() |> Nx.take(0)
+          {random_key, k1}
+      end
 
     batch_len = Nx.axis_size(batch, 0)
     {num_states, state_features_size} = state_features_memory.data.shape
@@ -658,48 +659,18 @@ defmodule Rein.Agents.SAC do
 
     non_final_mask = not is_terminal_batch
 
-    ### Train entropy_coefficient
-
-    {log_entropy_coefficient, log_entropy_coefficient_optimizer_state, random_key} =
-      case train_log_entropy_coefficient do
-        false ->
-          # entropy_coef is non-trainable
-          {log_entropy_coefficient, random_key}
-
-        true ->
-          {_actions, log_probs, random_key} =
-            actor_predict_fn.(random_key, actor_params, state_batch)
-
-          g =
-            grad(log_entropy_coefficient, fn log_entropy_coefficient ->
-              -Nx.mean(log_entropy_coefficient * stop_grad(log_probs + target_entropy))
-            end)
-
-          {updates, log_entropy_coefficient_optimizer_state} =
-            log_entropy_coefficient_optimizer_update_fn.(
-              g,
-              log_entropy_coefficient_optimizer_state,
-              log_entropy_coefficient
-            )
-
-          log_entropy_coefficient =
-            Polaris.Updates.apply_updates(log_entropy_coefficient, updates)
-
-          {log_entropy_coefficient, log_entropy_coefficient_optimizer_state, random_key}
-      end
-
     entropy_coefficient = stop_grad(Nx.exp(log_entropy_coefficient))
 
     ### Train critic_params
 
-    {{critic_loss, random_key}, {critic1_gradient, critic2_gradient}} =
+    {{critic_loss, k1}, {critic1_gradient, critic2_gradient}} =
       value_and_grad(
         {critic1_params, critic2_params},
         fn {critic1_params, critic2_params} ->
           # y_i = r_i + γ * min_{j=1,2} Q'(s_{i+1}, π(s_{i+1}|θ)|φ'_j)
 
-          {target_actions, log_probability, random_key} =
-            actor_predict_fn.(random_key, actor_target_params, next_state_batch)
+          {target_actions, log_probability, k1} =
+            actor_predict_fn.(k1, actor_target_params, next_state_batch)
 
           q1_target = critic_predict_fn.(critic1_target_params, next_state_batch, target_actions)
           q2_target = critic_predict_fn.(critic2_target_params, next_state_batch, target_actions)
@@ -732,7 +703,7 @@ defmodule Rein.Agents.SAC do
           critic1_loss = Nx.mean((backup - Nx.new_axis(q1, 0)) ** 2)
           critic2_loss = Nx.mean((backup - Nx.new_axis(q2, 0)) ** 2)
 
-          {Nx.add(critic1_loss, critic2_loss), random_key}
+          {0.5 * Nx.add(critic1_loss, critic2_loss), k1}
         end,
         &elem(&1, 0)
       )
@@ -749,33 +720,54 @@ defmodule Rein.Agents.SAC do
 
     ### Train Actor
 
-    ks = Nx.Random.split(random_key)
-    random_key = ks[0]
-    k1 = ks[1] |> Nx.devectorize() |> Nx.take(0)
+    {{_, log_probs}, actor_gradient} =
+      value_and_grad(
+        actor_params,
+        fn actor_params ->
+          {actions, log_probs, _k1} =
+            actor_predict_fn.(k1, actor_params, state_batch)
 
-    {actor_params, actor_optimizer_state} =
-      if train_actor do
-        actor_gradient =
-          grad(actor_params, fn actor_params ->
-            {actions, log_probability, _random_key} =
-              actor_predict_fn.(k1, actor_params, state_batch)
+          q1 = critic_predict_fn.(critic1_params, state_batch, actions)
 
-            q1 = critic_predict_fn.(critic1_params, state_batch, actions)
+          q2 = critic_predict_fn.(critic2_params, state_batch, actions)
 
-            q2 = critic_predict_fn.(critic2_params, state_batch, actions)
+          q = Nx.min(q1, q2)
 
-            q = Nx.min(q1, q2)
+          {Nx.mean(entropy_coefficient * log_probs - q), log_probs}
+        end,
+        &elem(&1, 0)
+      )
 
-            Nx.mean(entropy_coefficient * log_probability - q)
-          end)
+    {actor_updates, actor_optimizer_state} =
+      actor_optimizer_update_fn.(actor_gradient, actor_optimizer_state, actor_params)
 
-        {actor_updates, actor_optimizer_state} =
-          actor_optimizer_update_fn.(actor_gradient, actor_optimizer_state, actor_params)
+    actor_params = Polaris.Updates.apply_updates(actor_params, actor_updates)
 
-        actor_params = Polaris.Updates.apply_updates(actor_params, actor_updates)
-        {actor_params, actor_optimizer_state}
-      else
-        {actor_params, actor_optimizer_state}
+    ### Train entropy_coefficient
+
+    {log_entropy_coefficient, log_entropy_coefficient_optimizer_state} =
+      case train_log_entropy_coefficient do
+        false ->
+          # entropy_coef is non-trainable
+          {log_entropy_coefficient, log_entropy_coefficient_optimizer_state}
+
+        true ->
+          g =
+            grad(log_entropy_coefficient, fn log_entropy_coefficient ->
+              -Nx.mean(log_entropy_coefficient * (log_probs + target_entropy))
+            end)
+
+          {updates, log_entropy_coefficient_optimizer_state} =
+            log_entropy_coefficient_optimizer_update_fn.(
+              g,
+              log_entropy_coefficient_optimizer_state,
+              log_entropy_coefficient
+            )
+
+          log_entropy_coefficient =
+            Polaris.Updates.apply_updates(log_entropy_coefficient, updates)
+
+          {log_entropy_coefficient, log_entropy_coefficient_optimizer_state}
       end
 
     %{
@@ -798,7 +790,7 @@ defmodule Rein.Agents.SAC do
     }
   end
 
-  defnp soft_update_targets(state, train_actor) do
+  defnp soft_update_targets(state) do
     %{
       agent_state:
         %__MODULE__{
@@ -815,11 +807,7 @@ defmodule Rein.Agents.SAC do
     merge_fn = &Nx.as_type(&1 * tau + &2 * (1 - tau), Nx.type(&1))
 
     actor_target_params =
-      if train_actor do
-        Axon.Shared.deep_merge(actor_params, actor_target_params, merge_fn)
-      else
-        actor_target_params
-      end
+      Axon.Shared.deep_merge(actor_params, actor_target_params, merge_fn)
 
     critic1_target_params =
       Axon.Shared.deep_merge(critic1_params, critic1_target_params, merge_fn)
@@ -876,23 +864,13 @@ defmodule Rein.Agents.SAC do
     {stop_grad(batch), random_key}
   end
 
-  defnp action_log_probability(mu, stddev, log_stddev, x) do
+  defnp action_log_probability(mu, stddev, log_stddev, pre_squash_action, action) do
     # x is assumed to be pre tanh squashing
+    type = Nx.type(action)
+    eps = Nx.Constants.epsilon(type)
 
-    # this is the same as log_prob - Nx.sum(Nx.log(1 - tanh(x)^2)), derived via the
-    # definition of tanh(x) = (e^x - e^-x) / (e^x + e^-x) as follows:
-    # 1 - tanh(x)^2
-    # = 1 - ((e^2x - 2 + e^-2x) / (e^x + e-^x)^2
-    # = 4 / (e^x + e^-x)^2  (x e^-2x)
-    # = 4e^-2x / (1 + e^-2x)^2
-
-    # then, log(1 - tanh(x)^2) becomes:
-    # log(4) + log(e^-2x) - log((1 + e^-2x)^2)
-    # = 2log(2) - 2x - 2log(1 + e^-2x)
-    # = 2(log(2) - x - log(1 + e^-2x)), which is the version of the correction used below
-
-    log_prob(mu, stddev, log_stddev, x) -
-      2 * Nx.sum(Nx.log(2) - x - Nx.log1p(Nx.exp(-2 * x)), axes: [1], keep_axes: true)
+    log_prob(mu, stddev, log_stddev, pre_squash_action) -
+      Nx.sum(Nx.log(1 - action ** 2 + eps), axes: [-1], keep_axes: true)
   end
 
   defnp log_prob(mu, stddev, log_stddev, x) do
