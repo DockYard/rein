@@ -156,7 +156,14 @@ defmodule Rein do
     end)
   end
 
-  defp checkpoint(state, episode, model_name, checkpoint_path, checkpoint_serialization_fn) do
+  defp checkpoint(
+         state,
+         episode,
+         model_name,
+         checkpoint_path,
+         checkpoint_serialization_fn,
+         checkpoint_filter_fn
+       ) do
     if checkpoint_filter_fn.(state, episode) do
       serialized = checkpoint_serialization_fn.(state)
       File.write!(Path.join(checkpoint_path, "#{model_name}_#{episode}.ckpt"), serialized)
