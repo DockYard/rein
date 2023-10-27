@@ -36,7 +36,7 @@ defmodule Rein do
   @spec train(
           {environment :: module, init_opts :: keyword()},
           {agent :: module, init_opts :: keyword},
-          epoch_completed_callback :: (map() -> :ok),
+          episode_completed_callback :: (map() -> :ok),
           state_to_trajectory_fn :: (t() -> Nx.t()),
           opts :: keyword()
         ) :: term()
@@ -44,7 +44,7 @@ defmodule Rein do
   def train(
         _environment_with_options = {environment, environment_init_opts},
         _agent_with_options = {agent, agent_init_opts},
-        epoch_completed_callback,
+        episode_completed_callback,
         state_to_trajectory_fn,
         opts \\ []
       ) do
@@ -57,7 +57,7 @@ defmodule Rein do
         checkpoint_serialization_fn: &Nx.serialize/1,
         accumulated_episodes: 0,
         num_episodes: 100,
-        output_transform: & &1
+        checkpoint_filter_fn: fn _state, episode -> rem(episode, 500) == 0 end
       ])
 
     random_key = opts[:random_key] || Nx.Random.key(System.system_time())
@@ -101,19 +101,20 @@ defmodule Rein do
       agent,
       environment,
       initial_state,
-      epoch_completed_callback: epoch_completed_callback,
+      episode_completed_callback: episode_completed_callback,
       state_to_trajectory_fn: state_to_trajectory_fn,
       num_episodes: num_episodes,
       max_iter: max_iter,
       model_name: model_name,
       checkpoint_path: opts[:checkpoint_path],
       output_transform: opts[:output_transform],
-      checkpoint_serialization_fn: opts[:checkpoint_serialization_fn]
+      checkpoint_serialization_fn: opts[:checkpoint_serialization_fn],
+      checkpoint_filter_fn: opts[:checkpoint_filter_fn]
     )
   end
 
   defp loop(agent, environment, initial_state, opts) do
-    epoch_completed_callback = Keyword.fetch!(opts, :epoch_completed_callback)
+    episode_completed_callback = Keyword.fetch!(opts, :episode_completed_callback)
     state_to_trajectory_fn = Keyword.fetch!(opts, :state_to_trajectory_fn)
     num_episodes = Keyword.fetch!(opts, :num_episodes)
     max_iter = Keyword.fetch!(opts, :max_iter)
@@ -139,7 +140,7 @@ defmodule Rein do
         end
       )
       |> then(fn {state, iteration} ->
-        epoch_completed_callback.(%{step_state: state, episode: episode, iteration: iteration})
+        episode_completed_callback.(%{step_state: state, episode: episode, iteration: iteration})
         state
       end)
       |> tap(
@@ -148,14 +149,15 @@ defmodule Rein do
           episode,
           opts[:model_name],
           opts[:checkpoint_path],
-          opts[:checkpoint_serialization_fn]
+          opts[:checkpoint_serialization_fn],
+          opts[:checkpoint_filter_fn]
         )
       )
     end)
   end
 
   defp checkpoint(state, episode, model_name, checkpoint_path, checkpoint_serialization_fn) do
-    if rem(episode, 1000) == 0 do
+    if checkpoint_filter_fn.(state, episode) do
       serialized = checkpoint_serialization_fn.(state)
       File.write!(Path.join(checkpoint_path, "#{model_name}_#{episode}.ckpt"), serialized)
       File.write!(Path.join(checkpoint_path, "#{model_name}_latest.ckpt"), serialized)
