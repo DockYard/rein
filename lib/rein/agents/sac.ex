@@ -330,8 +330,7 @@ defmodule Rein.Agents.SAC do
 
     saved_state =
       (opts[:saved_state] || %{})
-      |> Map.from_struct()
-      |> Map.take(Map.keys(%__MODULE__{}))
+      |> Map.take(Map.keys(%__MODULE__{}) -- [:__struct__])
       |> Enum.filter(fn {_, v} -> v && not is_function(v) end)
       |> Map.new()
 
