@@ -44,8 +44,6 @@ defmodule Rein.Agents.SAC do
              :critic2_optimizer_state,
              :action_lower_limit,
              :action_upper_limit,
-             :exploration_decay_rate,
-             :exploration_increase_rate,
              :gamma,
              :tau,
              :state_features_memory,
@@ -54,7 +52,6 @@ defmodule Rein.Agents.SAC do
              :target_entropy
            ],
            keep: [
-             :exploration_fn,
              :environment_to_state_features_fn,
              :actor_predict_fn,
              :critic_predict_fn,
@@ -95,9 +92,6 @@ defmodule Rein.Agents.SAC do
     :total_reward,
     :actor_optimizer_update_fn,
     :critic_optimizer_update_fn,
-    :exploration_decay_rate,
-    :exploration_increase_rate,
-    :exploration_fn,
     :state_features_memory,
     :input_entry_size,
     :log_entropy_coefficient,
@@ -121,9 +115,6 @@ defmodule Rein.Agents.SAC do
       :entropy_coefficient_optimizer,
       reward_scale: 1,
       state_features_memory_length: 1,
-      exploration_decay_rate: 0.9995,
-      exploration_increase_rate: 1.1,
-      exploration_fn: &Nx.less(&1, 500),
       gamma: 0.99,
       experience_replay_buffer_max_size: 100_000,
       tau: 0.005,
@@ -301,9 +292,6 @@ defmodule Rein.Agents.SAC do
 
     state = %__MODULE__{
       input_entry_size: input_entry_size,
-      exploration_fn: opts[:exploration_fn],
-      exploration_decay_rate: opts[:exploration_decay_rate],
-      exploration_increase_rate: opts[:exploration_increase_rate],
       log_entropy_coefficient_optimizer_state: log_entropy_coefficient_optimizer_state,
       log_entropy_coefficient_optimizer_update_fn: log_entropy_coefficient_optimizer_update_fn,
       target_entropy: -num_actions,
@@ -342,8 +330,9 @@ defmodule Rein.Agents.SAC do
 
     saved_state =
       (opts[:saved_state] || %{})
-      |> Map.take(Map.keys(%__MODULE__{}) -- [:__struct__])
-      |> Enum.filter(fn {_, v} -> v end)
+      |> Map.from_struct()
+      |> Map.take(Map.keys(%__MODULE__{}))
+      |> Enum.filter(fn {_, v} -> v && not is_function(v) end)
       |> Map.new()
 
     state = Map.merge(state, saved_state)
