@@ -107,7 +107,8 @@ defmodule Rein do
       max_iter: max_iter,
       model_name: model_name,
       checkpoint_path: opts[:checkpoint_path],
-      output_transform: opts[:output_transform]
+      output_transform: opts[:output_transform],
+      checkpoint_serialization_fn: opts[:checkpoint_serialization_fn]
     )
   end
 
@@ -153,18 +154,11 @@ defmodule Rein do
     end)
   end
 
-  defp checkpoint(_state, epoch, _model_name, _checkpoint_path, _checkpoint_serialization_fn) do
-    if rem(epoch, 1000) == 0 do
-      # save model
-      # |> Axon.Loop.checkpoint(
-      #   event: :epoch_completed,
-      #   filter: [every: 100],
-      #   file_pattern: fn %{epoch: epoch} ->
-      #     "checkpoint_" <> opts[:model_name] <> "_#{epoch}.ckpt"
-      #   end,
-      #   path: opts[:checkpoint_path],
-      #   serialize_step_state: opts[:checkpoint_serialization_fn]
-      # )
+  defp checkpoint(state, episode, model_name, checkpoint_path, checkpoint_serialization_fn) do
+    if rem(episode, 1000) == 0 do
+      serialized = checkpoint_serialization_fn.(state)
+      File.write!(Path.join(checkpoint_path, "#{model_name}_#{episode}.ckpt"), serialized)
+      File.write!(Path.join(checkpoint_path, "#{model_name}_latest.ckpt"), serialized)
     end
   end
 

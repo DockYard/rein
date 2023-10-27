@@ -62,7 +62,9 @@ defmodule Rein.Agents.SAC do
              :gamma,
              :tau,
              :state_features_memory,
-             :log_entropy_coefficient
+             :log_entropy_coefficient,
+             :log_entropy_coefficient_optimizer_state,
+             :target_entropy
            ],
            keep: [
              :exploration_fn,
@@ -75,7 +77,9 @@ defmodule Rein.Agents.SAC do
              :batch_size,
              :training_frequency,
              :input_entry_size,
-             :reward_scale
+             :reward_scale,
+             :log_entropy_coefficient_optimizer_update_fn,
+             :train_log_entropy_coefficient
            ]}
 
   defstruct [
@@ -110,7 +114,11 @@ defmodule Rein.Agents.SAC do
     :state_features_memory,
     :input_entry_size,
     :log_entropy_coefficient,
-    :reward_scale
+    :reward_scale,
+    :train_log_entropy_coefficient,
+    :log_entropy_coefficient_optimizer_update_fn,
+    :log_entropy_coefficient_optimizer_state,
+    :target_entropy
   ]
 
   @impl true
@@ -123,6 +131,7 @@ defmodule Rein.Agents.SAC do
       :state_features_size,
       :actor_optimizer,
       :critic_optimizer,
+      :entropy_coefficient_optimizer,
       reward_scale: 1,
       state_features_memory_length: 1,
       exploration_decay_rate: 0.9995,
@@ -145,7 +154,7 @@ defmodule Rein.Agents.SAC do
     expected_opts
     |> Enum.filter(fn x -> is_atom(x) or (is_tuple(x) and is_nil(elem(x, 1))) end)
     |> Enum.reject(fn k ->
-      k in [:state_features_memory, :experience_replay_buffer]
+      k in [:state_features_memory, :experience_replay_buffer, :entropy_coefficient_optimizer]
     end)
     |> Enum.reduce(opts, fn
       k, opts ->
@@ -162,6 +171,15 @@ defmodule Rein.Agents.SAC do
 
     {actor_optimizer_init_fn, actor_optimizer_update_fn} = opts[:actor_optimizer]
     {critic_optimizer_init_fn, critic_optimizer_update_fn} = opts[:critic_optimizer]
+
+    log_entropy_coefficient = :math.log(opts[:entropy_coefficient])
+
+    {train_log_entropy_coefficient, log_entropy_coefficient_optimizer_init_fn,
+     log_entropy_coefficient_optimizer_update_fn} =
+      case opts[:entropy_coefficient_optimizer] do
+        {init, upd} -> {true, init, upd}
+        _ -> {false, fn _ -> 0 end, 0}
+      end
 
     actor_net = opts[:actor_net]
     critic_net = opts[:critic_net]
@@ -189,10 +207,9 @@ defmodule Rein.Agents.SAC do
       {eps, random_key} = Nx.Random.normal(random_key, shape: eps_shape)
 
       pre_squash_action = Nx.add(mu, Nx.multiply(stddev, eps))
-
-      log_probability = action_log_probability(mu, stddev, log_stddev, pre_squash_action)
-
       action = Nx.tanh(pre_squash_action)
+
+      log_probability = action_log_probability(mu, stddev, log_stddev, pre_squash_action, action)
 
       {action, log_probability, random_key}
     end
@@ -240,6 +257,9 @@ defmodule Rein.Agents.SAC do
       _ ->
         :ok
     end
+
+    log_entropy_coefficient_optimizer_state =
+      log_entropy_coefficient_optimizer_init_fn.(log_entropy_coefficient)
 
     actor_params = actor_init_fn.(input_template, %{})
     actor_optimizer_state = actor_optimizer_init_fn.(actor_params)
@@ -297,6 +317,10 @@ defmodule Rein.Agents.SAC do
       exploration_fn: opts[:exploration_fn],
       exploration_decay_rate: opts[:exploration_decay_rate],
       exploration_increase_rate: opts[:exploration_increase_rate],
+      log_entropy_coefficient_optimizer_state: log_entropy_coefficient_optimizer_state,
+      log_entropy_coefficient_optimizer_update_fn: log_entropy_coefficient_optimizer_update_fn,
+      target_entropy: -num_actions,
+      train_log_entropy_coefficient: train_log_entropy_coefficient,
       state_features_memory:
         opts[:state_features_memory] ||
           CircularBuffer.new({state_features_memory_length, state_features_size}),
@@ -329,13 +353,13 @@ defmodule Rein.Agents.SAC do
       reward_scale: opts[:reward_scale]
     }
 
-    # saved_state =
-    #   (opts[:saved_state] || %{})
-    #   |> Map.take(Map.keys(%__MODULE__{}) -- [:__struct__])
-    #   |> Enum.filter(fn {_, v} -> v end)
-    #   |> Map.new()
+    saved_state =
+      (opts[:saved_state] || %{})
+      |> Map.take(Map.keys(%__MODULE__{}) -- [:__struct__])
+      |> Enum.filter(fn {_, v} -> v end)
+      |> Map.new()
 
-    # state = Map.merge(state, saved_state)
+    state = Map.merge(state, saved_state)
 
     case random_key.vectorized_axes do
       [] ->
@@ -578,7 +602,11 @@ defmodule Rein.Agents.SAC do
         experience_replay_buffer: experience_replay_buffer,
         num_actions: num_actions,
         gamma: gamma,
-        log_entropy_coefficient: log_entropy_coefficient
+        log_entropy_coefficient: log_entropy_coefficient,
+        log_entropy_coefficient_optimizer_update_fn: log_entropy_coefficient_optimizer_update_fn,
+        log_entropy_coefficient_optimizer_state: log_entropy_coefficient_optimizer_state,
+        target_entropy: target_entropy,
+        train_log_entropy_coefficient: train_log_entropy_coefficient
       },
       random_key: random_key
     } = state
@@ -688,7 +716,7 @@ defmodule Rein.Agents.SAC do
           critic1_loss = Nx.mean((backup - Nx.new_axis(q1, 0)) ** 2)
           critic2_loss = Nx.mean((backup - Nx.new_axis(q2, 0)) ** 2)
 
-          {Nx.add(critic1_loss, critic2_loss), k1}
+          {0.5 * Nx.add(critic1_loss, critic2_loss), k1}
         end,
         &elem(&1, 0)
       )
@@ -705,24 +733,55 @@ defmodule Rein.Agents.SAC do
 
     ### Train Actor
 
-    actor_gradient =
-      grad(actor_params, fn actor_params ->
-        {actions, log_probability, _random_key} =
-          actor_predict_fn.(k1, actor_params, state_batch)
+    {{_, log_probs}, actor_gradient} =
+      value_and_grad(
+        actor_params,
+        fn actor_params ->
+          {actions, log_probs, _k1} =
+            actor_predict_fn.(k1, actor_params, state_batch)
 
-        q1 = critic_predict_fn.(critic1_params, state_batch, actions)
+          q1 = critic_predict_fn.(critic1_params, state_batch, actions)
 
-        q2 = critic_predict_fn.(critic2_params, state_batch, actions)
+          q2 = critic_predict_fn.(critic2_params, state_batch, actions)
 
-        q = Nx.min(q1, q2)
+          q = Nx.min(q1, q2)
 
-        Nx.mean(entropy_coefficient * log_probability - q)
-      end)
+          {Nx.mean(entropy_coefficient * log_probs - q), log_probs}
+        end,
+        &elem(&1, 0)
+      )
 
     {actor_updates, actor_optimizer_state} =
       actor_optimizer_update_fn.(actor_gradient, actor_optimizer_state, actor_params)
 
     actor_params = Polaris.Updates.apply_updates(actor_params, actor_updates)
+
+    ### Train entropy_coefficient
+
+    {log_entropy_coefficient, log_entropy_coefficient_optimizer_state} =
+      case train_log_entropy_coefficient do
+        false ->
+          # entropy_coef is non-trainable
+          {log_entropy_coefficient, log_entropy_coefficient_optimizer_state}
+
+        true ->
+          g =
+            grad(log_entropy_coefficient, fn log_entropy_coefficient ->
+              -Nx.mean(log_entropy_coefficient * (log_probs + target_entropy))
+            end)
+
+          {updates, log_entropy_coefficient_optimizer_state} =
+            log_entropy_coefficient_optimizer_update_fn.(
+              g,
+              log_entropy_coefficient_optimizer_state,
+              log_entropy_coefficient
+            )
+
+          log_entropy_coefficient =
+            Polaris.Updates.apply_updates(log_entropy_coefficient, updates)
+
+          {log_entropy_coefficient, log_entropy_coefficient_optimizer_state}
+      end
 
     %{
       state
@@ -737,7 +796,8 @@ defmodule Rein.Agents.SAC do
             loss: state.agent_state.loss + critic_loss,
             loss_denominator: state.agent_state.loss_denominator + 1,
             experience_replay_buffer: experience_replay_buffer,
-            log_entropy_coefficient: log_entropy_coefficient
+            log_entropy_coefficient: log_entropy_coefficient,
+            log_entropy_coefficient_optimizer_state: log_entropy_coefficient_optimizer_state
         },
         random_key: random_key
     }
@@ -817,23 +877,13 @@ defmodule Rein.Agents.SAC do
     {stop_grad(batch), random_key}
   end
 
-  defnp action_log_probability(mu, stddev, log_stddev, x) do
+  defnp action_log_probability(mu, stddev, log_stddev, pre_squash_action, action) do
     # x is assumed to be pre tanh squashing
+    type = Nx.type(action)
+    eps = Nx.Constants.epsilon(type)
 
-    # this is the same as log_prob - Nx.sum(Nx.log(1 - tanh(x)^2)), derived via the
-    # definition of tanh(x) = (e^x - e^-x) / (e^x + e^-x) as follows:
-    # 1 - tanh(x)^2
-    # = 1 - ((e^2x - 2 + e^-2x) / (e^x + e-^x)^2
-    # = 4 / (e^x + e^-x)^2  (x e^-2x)
-    # = 4e^-2x / (1 + e^-2x)^2
-
-    # then, log(1 - tanh(x)^2) becomes:
-    # log(4) + log(e^-2x) - log((1 + e^-2x)^2)
-    # = 2log(2) - 2x - 2log(1 + e^-2x)
-    # = 2(log(2) - x - log(1 + e^-2x)), which is the version of the correction used below
-
-    log_prob(mu, stddev, log_stddev, x) -
-      2 * Nx.sum(Nx.log(2) - x - Nx.log1p(Nx.exp(-2 * x)), axes: [1], keep_axes: true)
+    log_prob(mu, stddev, log_stddev, pre_squash_action) -
+      Nx.sum(Nx.log(1 - action ** 2 + eps), axes: [-1], keep_axes: true)
   end
 
   defnp log_prob(mu, stddev, log_stddev, x) do
