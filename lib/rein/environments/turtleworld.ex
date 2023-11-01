@@ -1,9 +1,13 @@
-defmodule Rein.Environments.ContinuousGridworld do
+defmodule Rein.Environments.Turtleworld do
   @moduledoc """
-  Gridworld-like environment with 1 continuous action.
+  Environment based on Turtle Graphics with 1 continuous action.
 
-  The agent starts at a random position in a 5x5 grid.
-  Unlike normal gridworld where the agent can move freely in 4 directions,
+  [Turtle Graphics](https://en.wikipedia.org/wiki/Turtle_graphics) are a way of
+  graphing using a cursor that can move around the screen and draw lines. Just like
+  trying to draw on paper without lifting the pen from the paper.
+
+  In this environment, the agent starts at a random position at the base of the grid.
+  Unlike `Rein.Environments.Gridworld` where the agent can move freely in 4 directions,
   this environment has 1 continuous action that turns the agent left or right.
   The agent will always move after turning with a continuous speed of 0.1, and each
   iteration comprises a $\\delta t$ of 1.0, so the agent will move 0.1 units per iteration.

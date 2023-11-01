@@ -1,4 +1,4 @@
-# First steps with Gridworld
+# First steps with Turtleworld
 
 ```elixir
 my_app_root = Path.join(__DIR__, "..")
@@ -22,7 +22,7 @@ In the code block below, we initialize some meta variables and configure our Veg
 ```elixir
 alias VegaLite, as: Vl
 
-{min_x, max_x, min_y, max_y} = Rein.Environments.Gridworld.bounding_box()
+{min_x, max_x, min_y, max_y} = Rein.Environments.Turtleworld.bounding_box()
 
 possible_targets_l = [[round((min_x + max_x) / 2), max_y]]
 
@@ -67,7 +67,7 @@ grid_widget =
 nil
 ```
 
-## Configuring and running the Q Learning Agent
+## Configuring and running the DDPG Agent
 
 Now we're ready to start configuring our agent. The `plot_fn` function defined below is a callback that `Rein` calls at the end of each iteration, so that we can do anything with the data.
 
@@ -102,10 +102,11 @@ plot_fn = fn loop_state ->
     points =
       trajectory[0..(iteration - 1)//1]
       |> Nx.to_list()
-      |> Enum.with_index(fn [x, y], index ->
+      |> Enum.with_index(fn [x, y, direction], index ->
         %{
           x: x,
           y: y,
+          direction: direction * 180 / :math.pi(),
           index: index
         }
       end)
@@ -119,7 +120,7 @@ end
 
 Now, we get to the actual training!
 
-The code below calls `Rein.train` with some configuration for the `Gridworld` environment being solved through a `QLearning` agent.
+The code below calls `Rein.train` with some configuration for the `Turtleworld` environment being solved through a `DDPG` agent.
 
 This will return the `Rein` struct in the `result` variable, so that we can inspect and/or save it afterwards.
 
@@ -129,30 +130,32 @@ Kino.VegaLite.clear(grid_widget)
 episodes = 15_000
 max_iter = 20
 
-environment_to_state_vector_fn = fn %{x: x, y: y, target_x: target_x, target_y: target_y} ->
-  delta_x = Nx.subtract(x, min_x)
-  delta_y = Nx.subtract(y, min_y)
+environment_to_state_features_fn = fn %{x: x, y: y, target_x: target_x, target_y: target_y, direction: direction} ->
+  import Kernel, only: []
+  import Nx.Defn.Kernel
 
-  Nx.stack([delta_x, delta_y, Nx.subtract(target_x, min_x), Nx.subtract(target_y, min_y)])
+  direction = direction / (2 * Nx.Constants.pi())
+  distance = Nx.sqrt((target_x - x) ** 2 + (target_y - y)  ** 2)
+
+  Nx.stack([direction, distance])
 end
 
-state_to_trajectory_fn = fn %{environment_state: %{x: x, y: y}} ->
-  Nx.stack([x, y])
+state_to_trajectory_fn = fn %{environment_state: %{x: x, y: y, direction: direction}} ->
+  Nx.stack([x, y, direction])
 end
-
-delta_x = max_x - min_x + 1
-delta_y = max_y - min_y + 1
-
-state_space_shape = {delta_x, delta_y, delta_x, delta_y}
 
 {t, result} =
   :timer.tc(fn ->
     Rein.train(
-      {Rein.Environments.Gridworld, possible_targets: possible_targets},
-      {Rein.Agents.QLearning,
-       state_space_shape: state_space_shape,
-       num_actions: 4,
-       environment_to_state_vector_fn: environment_to_state_vector_fn,
+      {Rein.Environments.Turtleworld, possible_targets: possible_targets},
+      {Rein.Agents.DDPG,
+       actor_net: actor_net,
+       critic_net: critic_net,
+       environment_to_state_features_fn: environment_to_state_features_fn,
+       state_features_memory_to_input_fn: state_features_memory_to_input_fn,
+       state_features_size: state_features_size,
+       actor_optimizer: actor_optimizer,
+       critic_optimizer: critic_optimizer,
        learning_rate: 1.0e-2,
        gamma: 0.99,
        exploration_eps: 1.0e-4},
@@ -170,9 +173,9 @@ With the code below, we can check some points of interest in the learned Q matri
 
 Especially, we can see below that for a target at x = 2, y = 4:
 
-* For the position x = 2, y = 3, the selected action is to go up;
-* For the position x = 1, y = 4, the selected action is to go right;
-* For the position x = 3, y = 4, the selected action is to go left.
+- For the position x = 2, y = 3, the selected action is to go up;
+- For the position x = 1, y = 4, the selected action is to go right;
+- For the position x = 3, y = 4, the selected action is to go left.
 
 This shows that at least for the positions closer to the target, our agent already knows the best policy for those respective states!
 
