@@ -79,7 +79,7 @@ max_points = 1000
 
 plot_fn = fn axon_state ->
   if axon_state.iteration > 1 do
-    episode = axon_state.epoch
+    episode = axon_state.episode
 
     Kino.VegaLite.clear(grid_widget, dataset: "target")
     Kino.VegaLite.clear(grid_widget, dataset: "trajectory")
@@ -158,6 +158,7 @@ state_space_shape = {delta_x, delta_y, delta_x, delta_y}
        exploration_eps: 1.0e-4},
       plot_fn,
       state_to_trajectory_fn,
+      checkpoint_path: "/tmp/gridworld",
       num_episodes: episodes,
       max_iter: max_iter
     )
